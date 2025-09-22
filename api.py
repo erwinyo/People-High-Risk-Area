@@ -2,10 +2,13 @@
 
 # Third-party imports
 import uvicorn
-from fastapi import FastAPI
+from pydantic import BaseModel
+from pymongo import MongoClient
+from fastapi import FastAPI, Body
 
 
 # Local imports
+
 
 app = FastAPI()
 
@@ -20,9 +23,23 @@ async def get_stats_live():
     return {"message": "Live stats endpoint"}
 
 
-@app.get("/api/config/area")
-async def get_config_area():
-    return {"message": "Config area endpoint"}
+@app.post("/api/area")
+async def get_area(r):
+    return {"message": "Area endpoint"}
+
+class AreaConfigRequest(BaseModel):
+    area_id: str
+    config_value: int
+
+
+@app.post("/api/config/area")
+async def setconfig_area(request: AreaConfigRequest = Body(...)):
+    # Access parameters with request.area_id and request.config_value
+    return {
+        "message": "Config area endpoint",
+        "area_id": request.area_id,
+        "config_value": request.config_value,
+    }
 
 
 if __name__ == "__main__":

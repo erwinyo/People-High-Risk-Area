@@ -1,18 +1,29 @@
 # Built-in imports
-
+import sys
+import json
+from datetime import datetime, timezone
 
 # Third-party imports
 import cv2
 import numpy as np
 import supervision as sv
+from loguru import logger
 from ultralytics import YOLO
-from vidgear.gears import CamGear
+from pymongo import MongoClient
+from vidgear.gears import CamGear, VideoGear
 
 # Local imports
+from utility import get_epoch_ms_iso_utc, get_areas, set_or_update_area
+
+# Logger configuration
+logger.remove()
+logger.add(sys.stdout, level="TRACE")
 
 
 def main():
     SOURCE = "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_10_Kepatihan.stream/playlist.m3u8"
+
+    # Start video stream
     stream = CamGear(source=SOURCE).start()
     cap = stream.stream
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -26,15 +37,14 @@ def main():
     polygon = np.array([[735, 721], [1389, 682], [1757, 804], [891, 902]])
     polygon_zone = sv.PolygonZone(polygon=polygon)
     polygon_annotator = sv.PolygonZoneAnnotator(
-        zone=polygon_zone,
-        color=sv.Color.WHITE,
-        thickness=2
+        zone=polygon_zone, color=sv.Color.WHITE, thickness=2
     )
 
     while True:
         frame = stream.read()
         if frame is None:
             break
+        epoch_ms, iso_utc = get_epoch_ms_iso_utc()
 
         result = model.track(
             source=frame,
@@ -48,8 +58,9 @@ def main():
         detections = sv.Detections.from_ultralytics(result)
         detections = smoother.update_with_detections(detections)
         detections_inside = detections[polygon_zone.trigger(detections)]
-        detections_inside_count = polygon_zone.current_count
+        detections_inside_count = len(detections_inside)
         detections_outside = detections[~polygon_zone.trigger(detections)]
+        detections_outside_count = len(detections_outside)
 
         labels = [f"{tracker_id}" for tracker_id in detections.tracker_id]
         annotated_image = polygon_annotator.annotate(
@@ -118,10 +129,21 @@ def test_vidgear():
 
 
 def capture_frame():
+    # cap = cv2.VideoCapture(
+    #     "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_10_Kepatihan.stream/playlist.m3u8",
+    #     cv2.CAP_FFMPEG,
+    # )
+
     cap = cv2.VideoCapture(
-        "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_10_Kepatihan.stream/playlist.m3u8",
+        "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_30_Pasar_Beringharjo.stream/playlist.m3u8",
         cv2.CAP_FFMPEG,
     )
+
+    # cap = cv2.VideoCapture(
+    #     "https://cctvjss.jogjakota.go.id/malioboro/NolKm_Utara.stream/playlist.m3u8",
+    #     cv2.CAP_FFMPEG,
+    # )
+
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     ret, frame = cap.read()
     cap.release()
@@ -129,8 +151,36 @@ def capture_frame():
         cv2.imwrite("frame.jpg", frame)
 
 
+def insert_area():
+    with open("areas.json", "r") as f:
+        area_data = json.load(f)
+    for location, areas in area_data.items():
+        for area in areas:
+            logger.info(f"Inserting area: {location}_{area['name']}")
+            set_or_update_area(
+                config_value={
+                    "name": area["name"],
+                    "polygon_zone": area["polygon_zone"],
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
+
+def test_mongo():
+    set_or_update_area(
+        "area_1",
+        {
+            "name": "Main Entrance",
+            "polygon_zone": [[735, 721], [1389, 682], [1757, 804], [891, 902]],
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
 if __name__ == "__main__":
-    main()
+    # main()
     # test_open_cv()
     # test_vidgear()
     # capture_frame()
+    insert_area()
+    # test_mongo()
