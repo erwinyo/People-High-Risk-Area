@@ -148,7 +148,8 @@ def get_areas():
 
 
 def get_count_by_tracker_id(tracker_id):
-    count = mo_synapsis_people.count_documents({"track_id": tracker_id})
+    logger.debug(f"Getting count for tracker_id: {tracker_id}")
+    count = mo_synapsis_people.count_documents({"tracker_id": tracker_id})
     return count
 
 
@@ -188,14 +189,14 @@ def set_counts(
 # ============================================================
 
 
-def set_people(conf, bbox, track_id, snapshot):
+def set_people(conf, bbox, tracker_id, snapshot):
     try:
         result = mo_synapsis_people.insert_one(
             {
                 "conf": conf,
                 "bbox": bbox,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "track_id": track_id,
+                "tracker_id": tracker_id,
                 "snapshot": snapshot,
             }
         )

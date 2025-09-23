@@ -17,6 +17,7 @@ from vidgear.gears import CamGear, VideoGear
 
 # Local imports
 from utility import (
+    MONGODB_URI,
     get_epoch_ms_iso_utc,
     get_areas,
     update_area,
@@ -34,8 +35,8 @@ logger.add(sys.stdout, level="TRACE")
 
 
 def main():
-    LOCATION = "nolkm"
-    AREAS = ["area_1", "area_2"]
+    LOCATION = "kepatihan"
+    AREAS = ["depan_gerbang_masuk"]
     SOURCES = {
         "kepatihan": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_10_Kepatihan.stream/playlist.m3u8",
         "nolkm": "https://cctvjss.jogjakota.go.id/malioboro/NolKm_Utara.stream/playlist.m3u8",
@@ -138,22 +139,24 @@ def main():
                     set_people(
                         conf=float(confidence),
                         bbox=[x1, y1, x2, y2],
-                        track_id=f"{PROGRAM_START_EPOCH_MS}_{tracker_id}",
+                        tracker_id=f"{PROGRAM_START_EPOCH_MS}_{tracker_id}",
                         snapshot=presigned_url,
                     )
 
                 set_counts(
-                    area_id=resp["area_id"],
+                    area_id=f"{LOCATION}_{area}",
                     in_num=detections_inside_count,
                     out_num=detections_outside_count,
-                    in_people=[
-                        f"{PROGRAM_START_EPOCH_MS}_{d}"
-                        for d in detections_inside.tracker_id
+                    in_people_id=[
+                        f"{PROGRAM_START_EPOCH_MS}_{tracker_id}"
+                        for tracker_id in detections_inside.tracker_id
                     ],
-                    out_people=[
-                        f"{PROGRAM_START_EPOCH_MS}_{d}"
-                        for d in detections_outside.tracker_id
+                    out_people_id=[
+                        f"{PROGRAM_START_EPOCH_MS}_{tracker_id}"
+                        for tracker_id in detections_outside.tracker_id
                     ],
+                    in_people_tracker_id=list(map(int, detections_inside.tracker_id)),
+                    out_people_tracker_id=list(map(int, detections_outside.tracker_id)),
                 )
 
         trigger_flag = False
@@ -168,7 +171,7 @@ def main():
         )
 
         cv2.imshow("view", annotated_image)
-        if cv2.waitKey(10) & 0xFF == ord("q"):
+        if cv2.waitKey(5) & 0xFF == ord("q"):
             break
 
 
@@ -282,7 +285,12 @@ def test_mongo():
     #     },
     # )
 
-    logger.debug(get_areas())
+    # logger.debug(get_areas())
+    MONGODB_URI = "mongodb://admin:admin@localhost:27017"
+    mo_client = MongoClient(MONGODB_URI)
+    mo_synapsis_people = mo_client["synapsis"]["people"]
+    count = mo_synapsis_people.count_documents({"tracker_id": "1758646608497_1"})
+    logger.info(f"Count: {count}")
 
 
 def test_minio():
