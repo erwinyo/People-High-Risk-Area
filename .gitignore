@@ -1,3 +1,6 @@
 .venv/
 models/*.pt
 mongodb/
+__pycache__/
+*.log
+minio/
