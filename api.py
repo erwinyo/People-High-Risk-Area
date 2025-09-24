@@ -11,10 +11,13 @@ from fastapi import FastAPI, Body
 from utility import (
     SynapsisResponse,
     get_epoch_ms_iso_utc,
+    get_timestamp,
     get_areas,
     update_area,
     set_area,
     get_area,
+    get_count_live,
+    get_count,
 )
 
 
@@ -33,13 +36,31 @@ app = FastAPI()
 
 
 @app.get("/api/stats", tags=["status"])
-async def fastapi_get_stats():
-    return {"message": "Stats endpoint"}
+async def fastapi_get_stats(
+    start_time: int = None, end_time: int = None, page: int = 1, limit: int = 10
+):
+    resp = get_count(start_time=start_time, end_time=end_time, page=page, limit=limit)
+    if resp == SynapsisResponse.SERVER_ERROR:
+        return {"status": "error", "message": "Error retrieving stats"}
+    else:
+        return {
+            "status": "success",
+            "message": "Stats retrieved successfully",
+            "data": resp,
+        }
 
 
 @app.get("/api/stats/live", tags=["status"])
-async def fastapi_get_stats_live():
-    return {"message": "Live stats endpoint"}
+def get_latest_stats():
+    resp = get_count_live()
+    if resp == SynapsisResponse.SERVER_ERROR:
+        return {"status": "error", "message": "Error retrieving latest stats"}
+    else:
+        return {
+            "status": "success",
+            "message": "Latest stats retrieved successfully",
+            "data": resp,
+        }
 
 
 @app.get("/api/area", tags=["area"])
@@ -54,14 +75,14 @@ async def fastapi_set_area(request: SetAreaRequest = Body(...)):
             "location": request.location,
             "area_name": request.area_name,
             "polygon_zone": request.polygon_zone,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": get_timestamp(),
         }
     )
 
     if resp == SynapsisResponse.SUCCESS:
         return {"status": "success", "message": "Area set/updated successfully"}
     else:
-        return {"status": "error", "message": resp.value}
+        return {"status": "error", "message": "Area set/update failed"}
 
 
 @app.post("/api/get/area", tags=["area"])

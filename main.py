@@ -4,6 +4,7 @@ import uuid
 import time
 import json
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Third-party imports
 import cv2
@@ -14,11 +15,11 @@ from ultralytics import YOLO
 from pymongo import MongoClient
 from vidgear.gears import CamGear, VideoGear
 
-
 # Local imports
 from utility import (
     MONGODB_URI,
     get_epoch_ms_iso_utc,
+    get_timestamp,
     get_areas,
     update_area,
     set_area,
@@ -26,6 +27,8 @@ from utility import (
     SynapsisResponse,
     upload_ndarray_to_minio,
     set_people,
+    set_people_many,
+    set_people_bulk_write,
     set_counts,
 )
 
@@ -59,10 +62,12 @@ def main():
     trace_annotator = sv.TraceAnnotator()
 
     # Define polygon zone
+    area_ids = []
     polygon_zones = []
     polygon_annotators = []
     for area in AREAS:
         resp = get_area(location=LOCATION, area_name=area)
+        logger.debug(f"Area response: {resp}")
 
         if resp == SynapsisResponse.NOT_FOUND:
             logger.warning(f"Area {area} not found in location {LOCATION}")
@@ -70,6 +75,8 @@ def main():
         if resp == SynapsisResponse.SERVER_ERROR:
             logger.error(f"Error retrieving area {area} in location {LOCATION}")
             return
+        id_temp = resp["_id"]
+        area_ids.append(str(id_temp))
 
         p_temp = sv.PolygonZone(np.array(resp["polygon_zone"]))
         polygon_zones.append(p_temp)
@@ -105,8 +112,8 @@ def main():
             last_trigger_time = current_time
 
         annotated_image = frame.copy()
-        for area, polygon_zone, polygon_annotator in zip(
-            AREAS, polygon_zones, polygon_annotators
+        for area_id, area_name, polygon_zone, polygon_annotator in zip(
+            area_ids, AREAS, polygon_zones, polygon_annotators
         ):
             polygon_trigger = polygon_zone.trigger(detections)
             detections_inside = detections[polygon_trigger]
@@ -115,11 +122,18 @@ def main():
             detections_outside_count = len(detections_outside)
 
             annotated_image = polygon_annotator.annotate(
-                scene=annotated_image, label=f"{detections_inside_count}\n{area}"
+                scene=annotated_image, label=f"{area_name}: {detections_inside_count}"
             )
 
             # trigger event for capture people inside polygon zone
+
             if trigger_flag:
+                st_ = time.time()
+                
+                people_list = []
+                cropped_images = []
+                if detections.is_empty():
+                    continue
                 for (
                     xyxy,
                     mask,
@@ -129,35 +143,60 @@ def main():
                     data,
                 ) in detections:
                     x1, y1, x2, y2 = map(int, xyxy)
+
+                    # Upload snapshot to MinIO
                     presigned_url = upload_ndarray_to_minio(
-                        object_name=f"{MINIO_BUCKET}/{LOCATION}/{area}/{uuid.uuid4()}.jpg",
+                        object_name=f"{MINIO_BUCKET}/{LOCATION}/{area_name}/{uuid.uuid4()}.jpg",
                         ndarray_image=cv2.cvtColor(
                             sv.crop_image(image=frame, xyxy=[x1, y1, x2, y2]),
                             cv2.COLOR_BGR2RGB,
                         ),
                     )
-                    set_people(
-                        conf=float(confidence),
-                        bbox=[x1, y1, x2, y2],
-                        tracker_id=f"{PROGRAM_START_EPOCH_MS}_{tracker_id}",
-                        snapshot=presigned_url,
+
+                    cropped_images
+
+                    people_list.append(
+                        {
+                            "conf": float(confidence),
+                            "bbox": [x1, y1, x2, y2],
+                            "tracker_id": f"{PROGRAM_START_EPOCH_MS}_{tracker_id}",
+                            "snapshot": presigned_url,
+                        }
                     )
 
+                    # inserted_id = set_people(
+                    #     conf=float(confidence),
+                    #     bbox=[x1, y1, x2, y2],
+                    #     tracker_id=f"{PROGRAM_START_EPOCH_MS}_{tracker_id}",
+                    #     snapshot=presigned_url,
+                    # )
+
+                # Insert people to MongoDB
+                # set_people_bulk_write(people_list, ordered=False)
+                inserted_ids = set_people_many(people_list)
+                if inserted_ids == SynapsisResponse.SERVER_ERROR:
+                    logger.error("Error inserting people to database")
+                    return
+                inserted_ids = np.array(inserted_ids).astype(str)
+
                 set_counts(
-                    area_id=f"{LOCATION}_{area}",
+                    area_id=area_id,
                     in_num=detections_inside_count,
                     out_num=detections_outside_count,
-                    in_people_id=[
+                    in_people_id=inserted_ids[polygon_trigger].tolist(),
+                    out_people_id=inserted_ids[~polygon_trigger].tolist(),
+                    in_people_tracker_id=[
                         f"{PROGRAM_START_EPOCH_MS}_{tracker_id}"
                         for tracker_id in detections_inside.tracker_id
                     ],
-                    out_people_id=[
+                    out_people_tracker_id=[
                         f"{PROGRAM_START_EPOCH_MS}_{tracker_id}"
                         for tracker_id in detections_outside.tracker_id
                     ],
-                    in_people_tracker_id=list(map(int, detections_inside.tracker_id)),
-                    out_people_tracker_id=list(map(int, detections_outside.tracker_id)),
                 )
+
+                en = time.time()
+                logger.debug(f"Set people and counts time: {en - st_} seconds")
 
         trigger_flag = False
 
@@ -258,7 +297,7 @@ def insert_area():
                     "location": location,
                     "area_name": area["name"],
                     "polygon_zone": area["polygon_zone"],
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": get_timestamp(),
                 }
             )
 
@@ -272,7 +311,7 @@ def test_mongo():
     #         "location": LOCATION,
     #         "area_name": AREAS,
     #         "polygon_zone": [[891, 902], [1757, 804], [2000, 850], [1000, 950]],
-    #         "updated_at": datetime.now(timezone.utc).isoformat(),
+    #         "updated_at": get_timestamp(),
     #     }
     # )
 
@@ -281,7 +320,7 @@ def test_mongo():
     #     area_name=AREAS,
     #     config_value={
     #         "polygon_zone": [[1000, 902], [1000, 804], [2000, 850], [1000, 950]],
-    #         "updated_at": datetime.now(timezone.utc).isoformat(),
+    #         "updated_at": get_timestamp(),
     #     },
     # )
 

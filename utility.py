@@ -1,4 +1,5 @@
 # Built-in imports
+import os
 import time
 from enum import Enum
 from io import BytesIO
@@ -9,11 +10,15 @@ from datetime import datetime, timezone, timedelta
 from PIL import Image
 from minio import Minio
 from loguru import logger
+from dotenv import load_dotenv
 from pymongo import MongoClient
 from minio.error import S3Error
 from minio.commonconfig import CopySource
 
 # Local imports
+
+
+load_dotenv()
 
 
 class SynapsisResponse(Enum):
@@ -27,17 +32,17 @@ class SynapsisResponse(Enum):
 
 
 # MongoDB setup
-MONGODB_URI = "mongodb://admin:admin@localhost:27017"
+MONGODB_URI = os.getenv("MONGODB_URI")
 mo_client = MongoClient(MONGODB_URI)
 mo_synapsis_people = mo_client["synapsis"]["people"]
 mo_synapsis_areas = mo_client["synapsis"]["areas"]
 mo_synapsis_counts = mo_client["synapsis"]["counts"]
 
 # MinIO setup
-MINIO_URI = "localhost:9000"
-MINIO_SECURE = False
-MINIO_ACCESS_KEY = "minioadmin"
-MINIO_SECRET = "minioadmin"
+MINIO_URI = os.getenv("MINIO_URI")
+MINIO_SECURE = os.getenv("MINIO_SECURE") == "True"
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
+MINIO_SECRET = os.getenv("MINIO_SECRET")
 minio_client = Minio(
     MINIO_URI,
     access_key=MINIO_ACCESS_KEY,
@@ -49,14 +54,25 @@ minio_client = Minio(
 def get_epoch_ms_iso_utc():
     # Epoch timestamp (milliseconds)
     epoch_ms = int(time.time() * 1000)
-
     # ISO 8601 UTC timestamp
-    iso_utc = datetime.now(timezone.utc).isoformat()
-
+    iso_utc = get_timestamp()
     return epoch_ms, iso_utc
 
 
+def get_timestamp():
+    # WIB timezone (UTC+7) Indonesia Western Standard Time
+    WIB = timezone(timedelta(hours=7))
+    now_wib = datetime.now(WIB).isoformat()
+    return now_wib
+
+
 # ============================================================
+# AREAS
+
+
+def check_area_exists(location, area_name):
+    query_filter = {"location": location, "area_name": area_name}
+    return mo_synapsis_areas.count_documents(query_filter) > 0
 
 
 def update_area(location, area_name, config_value):
@@ -71,7 +87,7 @@ def update_area(location, area_name, config_value):
             area_name = "depan_gedung"
             config_value = {
                 "polygon_zone": [[735, 721], [1389, 682], [1757, 804], [891, 902]],
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": get_timestamp(),
             }
     """
     query_filter = {"location": location, "area_name": area_name}
@@ -101,7 +117,7 @@ def set_area(config_value):
                 "location": "kepatihan",
                 "area_name": "depan_gedung",
                 "polygon_zone": [[735, 721], [1389, 682], [1757, 804], [891, 902]],
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": get_timestamp(),
             }
     """
     try:
@@ -129,7 +145,7 @@ def get_area(location, area_name):
 
     try:
         area = mo_synapsis_areas.find_one(
-            {"location": location, "area_name": area_name}, {"_id": 0}
+            {"location": location, "area_name": area_name}
         )
         logger.debug(f"Retrieved area: {area}")
         if area is None:
@@ -145,6 +161,51 @@ def get_areas():
 
 
 # ============================================================
+# COUNTS
+
+
+def get_count_live():
+    try:
+        doc = mo_synapsis_counts.find_one(sort=[("timestamp", -1)])
+        if doc:
+            doc["_id"] = str(doc["_id"])
+            return doc
+    except Exception as e:
+        logger.debug(f"Error retrieving latest counts: {str(e)}")
+        return SynapsisResponse.NOT_FOUND
+
+
+def get_count(start_time=None, end_time=None, page=1, limit=10):
+    query = {}
+    if start_time and end_time:
+        query["timestamp"] = {"$gte": start_time, "$lte": end_time}
+
+    skip = (page - 1) * limit
+
+    try:
+        cursor = (
+            mo_synapsis_counts.find(query).skip(skip).limit(limit).sort("timestamp", -1)
+        )
+        data = list(cursor)
+
+        # Convert ObjectId to string
+        for d in data:
+            d["_id"] = str(d["_id"])
+
+        total = mo_synapsis_counts.count_documents(query)
+        logger.debug(
+            f"Retrieved counts: page={page}, limit={limit}, total_records={total}"
+        )
+        return {
+            "status": "success",
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "data": data,
+        }
+    except Exception as e:
+        logger.debug(f"Error retrieving counts: {str(e)}")
+        return SynapsisResponse.SERVER_ERROR
 
 
 def get_count_by_tracker_id(tracker_id):
@@ -164,9 +225,9 @@ def set_counts(
 ):
     counts_by_tracker_id = {}
     for tracker_id in in_people_tracker_id:
-        counts_by_tracker_id[tracker_id] = get_count_by_tracker_id(tracker_id)
+        counts_by_tracker_id[f"{tracker_id}"] = get_count_by_tracker_id(tracker_id)
     try:
-        mo_synapsis_people.insert_one(
+        mo_synapsis_counts.insert_one(
             {
                 "area_id": area_id,
                 "in": in_num,
@@ -176,7 +237,7 @@ def set_counts(
                 "in_people_tracker_id": in_people_tracker_id,
                 "out_people_tracker_id": out_people_tracker_id,
                 "in_people_occurrences": counts_by_tracker_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": get_timestamp(),
             }
         )
         logger.debug(f"Counts updated for area_id: {area_id}")
@@ -187,6 +248,7 @@ def set_counts(
 
 
 # ============================================================
+# PEOPLE
 
 
 def set_people(conf, bbox, tracker_id, snapshot):
@@ -195,22 +257,65 @@ def set_people(conf, bbox, tracker_id, snapshot):
             {
                 "conf": conf,
                 "bbox": bbox,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": get_timestamp(),
                 "tracker_id": tracker_id,
                 "snapshot": snapshot,
             }
         )
         logger.debug(f"People inserted with id: {result.inserted_id}")
-        return SynapsisResponse.SUCCESS
+        return result.inserted_id
     except Exception as e:
         logger.debug(f"Error inserting people: {str(e)}")
         return SynapsisResponse.SERVER_ERROR
 
 
+def set_people_many(people_list):
+    """
+    Insert multiple people records into the database.
+
+    Args:
+        people_list (list of dict): Each dict should contain keys:
+            'conf', 'bbox', 'tracker_id', 'snapshot'.
+            Example:
+            [
+                {
+                    "conf": 0.98,
+                    "bbox": [100, 200, 300, 400],
+                    "tracker_id": "abc123",
+                    "snapshot": "base64string"
+                },
+                ...
+            ]
+    """
+    try:
+        # Add timestamp to each record
+        timestamp = get_timestamp()
+        for person in people_list:
+            person["timestamp"] = timestamp
+        result = mo_synapsis_people.insert_many(people_list)
+        logger.debug(f"People inserted with ids: {result.inserted_ids}")
+        return result.inserted_ids
+    except Exception as e:
+        logger.error(f"Error inserting people: {str(e)}")
+        return SynapsisResponse.SERVER_ERROR
+
+
+def set_people_bulk_write(people_list, ordered=False):
+    try:
+        requests = [mo_synapsis_people.insert_one(i) for i in people_list]
+        mo_synapsis_people.bulk_write(requests, ordered=ordered)
+        logger.debug(f"People bulk inserted: {len(people_list)} records")
+        return SynapsisResponse.SUCCESS
+    except Exception as e:
+        logger.debug(f"Error in bulk inserting people: {str(e)}")
+        return SynapsisResponse.SERVER_ERROR
+
+
 # ============================================================
+# MINIO
 
 
-def upload_ndarray_to_minio(object_name, ndarray_image, fmt="JPEG"):
+def upload_ndarray_to_minio(object_name, ndarray_image, expire_days=7, fmt="JPEG"):
     try:
         if "/" not in object_name:
             raise ValueError(
@@ -235,7 +340,7 @@ def upload_ndarray_to_minio(object_name, ndarray_image, fmt="JPEG"):
         )
 
         presigned_url = minio_client.presigned_get_object(
-            bucket_name, object_name, expires=timedelta(days=7)
+            bucket_name, object_name, expires=timedelta(days=expire_days)
         )
 
         return presigned_url
