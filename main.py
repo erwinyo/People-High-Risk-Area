@@ -14,7 +14,7 @@ import supervision as sv
 from loguru import logger
 from ultralytics import YOLO
 from pymongo import MongoClient
-from vidgear.gears import CamGear, VideoGear
+from vidgear.gears import CamGear, VideoGear, StreamGear
 
 # Local imports
 from utility import (
@@ -62,8 +62,8 @@ def refresh_areas(LOCATION, AREAS):
 
 
 def main():
-    LOCATION = "kepatihan"
-    AREAS = ["depan_gerbang_masuk"]
+    LOCATION = "nolkm"
+    AREAS = ["area_1", "area_2"]
     SOURCES = {
         "kepatihan": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_10_Kepatihan.stream/playlist.m3u8",
         "nolkm": "https://cctvjss.jogjakota.go.id/malioboro/NolKm_Utara.stream/playlist.m3u8",
@@ -76,6 +76,11 @@ def main():
     stream = CamGear(source=SOURCES[LOCATION]).start()
     cap = stream.stream
     fps = cap.get(cv2.CAP_PROP_FPS)
+    # enable livestreaming and retrieve framerate from CamGear Stream and
+    # pass it as `-input_framerate` parameter for controlled framerate
+    stream_params = {"-input_framerate": stream.framerate, "-livestream": True}
+    # describe a suitable manifest-file location/name
+    streamer = StreamGear(output="hls_out.m3u8", format="hls", **stream_params)
 
     # YOLO + Supervision setup
     model = YOLO("models\\yolo11l.pt")
@@ -229,9 +234,19 @@ def main():
             scene=annotated_image, detections=detections, labels=labels
         )
 
+        # send frame to streamer
+        streamer.stream(annotated_image)
+        # show frame
         cv2.imshow("view", annotated_image)
         if cv2.waitKey(5) & 0xFF == ord("q"):
             break
+
+    # close output window
+    cv2.destroyAllWindows()
+    # safely close video stream
+    stream.stop()
+    # safely close streamer
+    streamer.close()
 
 
 def test_open_cv():

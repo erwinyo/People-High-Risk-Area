@@ -1,15 +1,7 @@
 # ---------- base ----------
 FROM ubuntu:24.04 AS base
 
-ENV TZ=Asia/Jakarta \
-    DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_CREATE=true \
-    POETRY_VIRTUALENVS_IN_PROJECT=true \
-    POETRY_CACHE_DIR=/tmp/poetry_cache \
-    POETRY_REQUESTS_TIMEOUT=1000
+ENV TZ=Asia/Jakarta
 
 # timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -33,40 +25,15 @@ RUN apt-get update && apt-get install -y \
 # ensure pipx-installed binaries are on PATH
 ENV PATH="/root/.local/bin:${PATH}"
 
-# infisical cli
-RUN curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
-    && apt-get update && apt-get install -y infisical \
-    && rm -rf /var/lib/apt/lists/*
-
-# ---------- deps ----------
-FROM base AS dependencies
 WORKDIR /app
+RUN pipx install uv
+RUN pipx ensurepath
 
-# install Poetry isolated from system site-packages
-RUN pipx install "poetry>=1.6"
-
-# copy only files needed to resolve/install deps (better cache)
-COPY pyproject.toml poetry.lock* ./
-
-# install only the main (non-dev) dependency groups into an in-project venv at /app/.venv
-RUN poetry install --no-root --only main --sync
-
-# ---------- runtime ----------
-FROM base AS runtime
-WORKDIR /app
-
-# copy the prebuilt virtualenv first (best cache hit)
-COPY --from=dependencies /app/.venv /app/.venv
-
-# make the venv the default Python
-ENV VIRTUAL_ENV="/app/.venv"
-ENV PATH="/app/.venv/bin:${PATH}"
+COPY pyproject.toml uv.lock* ./
+RUN uv sync
 
 # copy app code last for better rebuild times
 COPY . .
-
-# create config dir for mounts (root owns it by default)
-RUN mkdir -p /app/config
 
 # run as root (default)
 USER root
