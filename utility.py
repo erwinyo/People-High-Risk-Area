@@ -75,23 +75,45 @@ def check_area_exists(location, area_name):
     return mo_synapsis_areas.count_documents(query_filter) > 0
 
 
-def update_area(location, area_name, config_value):
+def delete_area(location, area_name):
+    """Delete an area from the database.
+
+    Args:
+        location (str): The location of the area.
+        area_name (str): The name of the area to delete.
+    """
+    if not check_area_exists(location, area_name):
+        logger.warning(f"Area not found: `{area_name}` at location `{location}`")
+        return SynapsisResponse.NOT_FOUND
+
+    query_filter = {"location": location, "area_name": area_name}
+    try:
+        mo_synapsis_areas.delete_one(query_filter)
+        logger.info(f"Area deleted: `{area_name}` at location `{location}`")
+        return SynapsisResponse.SUCCESS
+    except Exception as e:
+        logger.error(f"Error deleting area: {str(e)}")
+        return SynapsisResponse.SERVER_ERROR
+
+
+def update_area(location, area_name, polygon_zone):
     """Set or update an area in the database.
 
     Args:
         location (str): The location of the area.
         area_name (str): The name of the area to update.
-        config_value (dict): The configuration values to set.
+        polygon_zone (list): The polygon zone coordinates.
             example:
             location = "kepatihan"
             area_name = "depan_gedung"
-            config_value = {
-                "polygon_zone": [[735, 721], [1389, 682], [1757, 804], [891, 902]],
-                "updated_at": get_timestamp(),
-            }
+            polygon_zone = [[735, 721], [1389, 682], [1757, 804], [891, 902]]
     """
+    if not check_area_exists(location, area_name):
+        logger.warning(f"Area not found: `{area_name}` at location `{location}`")
+        return SynapsisResponse.NOT_FOUND
+
     query_filter = {"location": location, "area_name": area_name}
-    update_operation = {"$set": config_value}
+    update_operation = {"$set": {"polygon_zone": polygon_zone}}
     try:
         mo_synapsis_areas.update_one(
             query_filter,
@@ -99,37 +121,43 @@ def update_area(location, area_name, config_value):
             upsert=True,
         )
         logger.info(f"Area updated: `{area_name}` at location `{location}`")
-        logger.debug(f"Area details: {config_value}")
+        logger.debug(f"Updated polygon_zone: {polygon_zone}")
         return SynapsisResponse.SUCCESS
     except Exception as e:
         logger.error(f"Error updating area: {str(e)}")
         return SynapsisResponse.SERVER_ERROR
 
 
-def set_area(config_value):
+def set_area(location, area_name, polygon_zone):
     """Set or update an area in the database.
 
     Args:
-        config_value (dict): The configuration values to set.
+        location (str): The location of the area.
+        area_name (str): The name of the area to set.
+        polygon_zone (list): The polygon zone coordinates.
             example:
-            config_value = {
-                "_id": ObjectId("650d3f4e1c9d440000f8b2a1"),
-                "location": "kepatihan",
-                "area_name": "depan_gedung",
-                "polygon_zone": [[735, 721], [1389, 682], [1757, 804], [891, 902]],
+            location = "kepatihan"
+            area_name = "depan_gedung"
+            polygon_zone = [[735, 721], [1389, 682], [1757, 804], [891, 902]]
+    """
+    if check_area_exists(location, area_name):
+        logger.warning(f"Area already exists: `{area_name}` at location `{location}`")
+        return SynapsisResponse.BAD_REQUEST
+
+    try:
+        mo_synapsis_areas.insert_one(
+            {
+                "location": location,
+                "area_name": area_name,
+                "polygon_zone": polygon_zone,
                 "updated_at": get_timestamp(),
             }
-    """
-    try:
-        mo_synapsis_areas.insert_one(config_value)
-        logger.info(
-            f"Area inserted: `{config_value.get('area_name')}` at location `{config_value.get('location')}`"
         )
-        logger.debug(f"Area details: {config_value}")
-
+        logger.info(f"Area set: `{area_name}` at location `{location}`")
+        logger.debug(f"Polygon_zone: {polygon_zone}")
         return SynapsisResponse.SUCCESS
     except Exception as e:
-        logger.debug(f"Error inserting area: {str(e)}")
+        logger.error(f"Error inserting area: {str(e)}")
         return SynapsisResponse.SERVER_ERROR
 
 
@@ -142,7 +170,9 @@ def get_area(location, area_name):
     Returns:
         dict: The area details or an error response.
     """
-
+    if not check_area_exists(location, area_name):
+        logger.warning(f"Area not found: `{area_name}` at location `{location}`")
+        return SynapsisResponse.NOT_FOUND
     try:
         area = mo_synapsis_areas.find_one(
             {"location": location, "area_name": area_name}
@@ -152,11 +182,12 @@ def get_area(location, area_name):
             return SynapsisResponse.NOT_FOUND
         return area
     except Exception as e:
-        logger.debug(f"Error retrieving area: {str(e)}")
+        logger.error(f"Error retrieving area: {str(e)}")
         return SynapsisResponse.SERVER_ERROR
 
 
 def get_areas():
+    """Get all areas from the database."""
     return list(mo_synapsis_areas.find({}, {"_id": 0}))
 
 
@@ -165,17 +196,33 @@ def get_areas():
 
 
 def get_count_live():
+    """Get the latest count from the database.
+
+    Returns:
+        dict: The latest count data
+    """
     try:
         doc = mo_synapsis_counts.find_one(sort=[("timestamp", -1)])
         if doc:
             doc["_id"] = str(doc["_id"])
             return doc
     except Exception as e:
-        logger.debug(f"Error retrieving latest counts: {str(e)}")
+        logger.error(f"Error retrieving latest counts: {str(e)}")
         return SynapsisResponse.NOT_FOUND
 
 
 def get_count(start_time=None, end_time=None, page=1, limit=10):
+    """Get count data from the database.
+
+    Args:
+        start_time (int, optional): Start time for the query. Defaults to None.
+        end_time (int, optional): End time for the query. Defaults to None.
+        page (int, optional): Page number for pagination. Defaults to 1.
+        limit (int, optional): Number of records to return per page. Defaults to 10.
+
+    Returns:
+        dict: The count data
+    """
     query = {}
     if start_time and end_time:
         query["timestamp"] = {"$gte": start_time, "$lte": end_time}
@@ -187,28 +234,37 @@ def get_count(start_time=None, end_time=None, page=1, limit=10):
             mo_synapsis_counts.find(query).skip(skip).limit(limit).sort("timestamp", -1)
         )
         data = list(cursor)
-
         # Convert ObjectId to string
         for d in data:
             d["_id"] = str(d["_id"])
+        total_in = sum(d.get("in", 0) for d in data)
+        total_out = sum(d.get("out", 0) for d in data)
 
-        total = mo_synapsis_counts.count_documents(query)
+        total_records = mo_synapsis_counts.count_documents(query)
         logger.debug(
-            f"Retrieved counts: page={page}, limit={limit}, total_records={total}"
+            f"Retrieved counts: page={page}, limit={limit}, total_records={total_records}"
         )
         return {
-            "status": "success",
             "page": page,
             "limit": limit,
-            "total": total,
+            "total_in": total_in,
+            "total_out": total_out,
+            "total_records": total_records,
             "data": data,
         }
     except Exception as e:
-        logger.debug(f"Error retrieving counts: {str(e)}")
+        logger.error(f"Error retrieving counts: {str(e)}")
         return SynapsisResponse.SERVER_ERROR
 
 
 def get_count_by_tracker_id(tracker_id):
+    """Get count data for a specific tracker ID.
+
+    Args:
+        tracker_id (str): The ID of the tracker.
+    Returns:
+        int: The count of occurrences for the given tracker ID.
+    """
     logger.debug(f"Getting count for tracker_id: {tracker_id}")
     count = mo_synapsis_people.count_documents({"tracker_id": tracker_id})
     return count
@@ -243,7 +299,7 @@ def set_counts(
         logger.debug(f"Counts updated for area_id: {area_id}")
         return SynapsisResponse.SUCCESS
     except Exception as e:
-        logger.debug(f"Error updating counts: {str(e)}")
+        logger.error(f"Error updating counts: {str(e)}")
         return SynapsisResponse.SERVER_ERROR
 
 
@@ -265,7 +321,7 @@ def set_people(conf, bbox, tracker_id, snapshot):
         logger.debug(f"People inserted with id: {result.inserted_id}")
         return result.inserted_id
     except Exception as e:
-        logger.debug(f"Error inserting people: {str(e)}")
+        logger.error(f"Error inserting people: {str(e)}")
         return SynapsisResponse.SERVER_ERROR
 
 
@@ -282,7 +338,7 @@ def set_people_many(people_list):
                     "conf": 0.98,
                     "bbox": [100, 200, 300, 400],
                     "tracker_id": "abc123",
-                    "snapshot": "base64string"
+                    "snapshot": "http://example.com/snapshot1.jpg"
                 },
                 ...
             ]
@@ -301,13 +357,29 @@ def set_people_many(people_list):
 
 
 def set_people_bulk_write(people_list, ordered=False):
+    """Insert multiple people records into the database.
+
+    Args:
+        people_list (list of dict): Each dict should contain keys:
+            'conf', 'bbox', 'tracker_id', 'snapshot'.
+            Example:
+            [
+                {
+                    "conf": 0.98,
+                    "bbox": [100, 200, 300, 400],
+                    "tracker_id": "abc123",
+                    "snapshot": "http://example.com/snapshot1.jpg"
+                },
+                ...
+            ]
+    """
     try:
         requests = [mo_synapsis_people.insert_one(i) for i in people_list]
         mo_synapsis_people.bulk_write(requests, ordered=ordered)
         logger.debug(f"People bulk inserted: {len(people_list)} records")
         return SynapsisResponse.SUCCESS
     except Exception as e:
-        logger.debug(f"Error in bulk inserting people: {str(e)}")
+        logger.error(f"Error in bulk inserting people: {str(e)}")
         return SynapsisResponse.SERVER_ERROR
 
 

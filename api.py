@@ -18,6 +18,7 @@ from utility import (
     get_area,
     get_count_live,
     get_count,
+    delete_area,
 )
 
 
@@ -28,6 +29,17 @@ class SetAreaRequest(BaseModel):
 
 
 class GetAreaRequest(BaseModel):
+    location: str
+    area_name: str
+
+
+class UpdateAreaRequest(BaseModel):
+    location: str
+    area_name: str
+    polygon_zone: list[list[int]]
+
+
+class DeleteAreaRequest(BaseModel):
     location: str
     area_name: str
 
@@ -71,16 +83,15 @@ async def fastapi_get_areas():
 @app.post("/api/set/area", tags=["area"])
 async def fastapi_set_area(request: SetAreaRequest = Body(...)):
     resp = set_area(
-        {
-            "location": request.location,
-            "area_name": request.area_name,
-            "polygon_zone": request.polygon_zone,
-            "updated_at": get_timestamp(),
-        }
+        location=request.location,
+        area_name=request.area_name,
+        polygon_zone=request.polygon_zone,
     )
 
     if resp == SynapsisResponse.SUCCESS:
         return {"status": "success", "message": "Area set/updated successfully"}
+    elif resp == SynapsisResponse.BAD_REQUEST:
+        return {"status": "error", "message": "Area already exists"}
     else:
         return {"status": "error", "message": "Area set/update failed"}
 
@@ -91,15 +102,46 @@ async def fastapi_get_area(request: GetAreaRequest = Body(...)):
         location=request.location,
         area_name=request.area_name,
     )
+    resp["_id"] = str(resp["_id"])  # Cannot parse ObjectId to JSON directly
 
     if resp == SynapsisResponse.SERVER_ERROR:
         return {"status": "error", "message": "Get area failed"}
+    elif resp == SynapsisResponse.NOT_FOUND:
+        return {"status": "error", "message": "Area not found"}
     else:
         return {
             "status": "success",
             "message": "Area retrieved successfully",
             "data": resp,
         }
+
+
+@app.post("/api/update/area", tags=["area"])
+async def fastapi_update_area(request: UpdateAreaRequest = Body(...)):
+    resp = update_area(
+        location=request.location,
+        area_name=request.area_name,
+        polygon_zone=request.polygon_zone,
+    )
+
+    if resp == SynapsisResponse.SUCCESS:
+        return {"status": "success", "message": "Area set/updated successfully"}
+    elif resp == SynapsisResponse.NOT_FOUND:
+        return {"status": "error", "message": "Area not found"}
+    else:
+        return {"status": "error", "message": "Area set/update failed"}
+
+
+@app.post("/api/delete/area", tags=["area"])
+async def fastapi_delete_area(request: DeleteAreaRequest = Body(...)):
+    resp = delete_area(location=request.location, area_name=request.area_name)
+
+    if resp == SynapsisResponse.SUCCESS:
+        return {"status": "success", "message": "Area deleted successfully"}
+    elif resp == SynapsisResponse.NOT_FOUND:
+        return {"status": "error", "message": "Area not found"}
+    else:
+        return {"status": "error", "message": "Area deletion failed"}
 
 
 if __name__ == "__main__":

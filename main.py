@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Third-party imports
 import cv2
+import schedule
 import numpy as np
 import supervision as sv
 from loguru import logger
@@ -37,6 +38,29 @@ logger.remove()
 logger.add(sys.stdout, level="TRACE")
 
 
+def refresh_areas(LOCATION, AREAS):
+    area_ids, polygon_zones, polygon_annotators = [], [], []
+    for area in AREAS:
+        resp = get_area(location=LOCATION, area_name=area)
+        logger.debug(f"Area response: {resp}")
+
+        if resp == SynapsisResponse.NOT_FOUND:
+            logger.warning(f"Area {area} not found in location {LOCATION}")
+            return None, None, None
+        if resp == SynapsisResponse.SERVER_ERROR:
+            logger.error(f"Error retrieving area {area} in location {LOCATION}")
+            return None, None, None
+        id_temp = resp["_id"]
+        area_ids.append(str(id_temp))
+
+        p_temp = sv.PolygonZone(np.array(resp["polygon_zone"]))
+        polygon_zones.append(p_temp)
+        polygon_annotators.append(
+            sv.PolygonZoneAnnotator(zone=p_temp, color=sv.Color.WHITE, thickness=2)
+        )
+    return area_ids, polygon_zones, polygon_annotators
+
+
 def main():
     LOCATION = "kepatihan"
     AREAS = ["depan_gerbang_masuk"]
@@ -62,36 +86,25 @@ def main():
     trace_annotator = sv.TraceAnnotator()
 
     # Define polygon zone
-    area_ids = []
-    polygon_zones = []
-    polygon_annotators = []
-    for area in AREAS:
-        resp = get_area(location=LOCATION, area_name=area)
-        logger.debug(f"Area response: {resp}")
+    area_ids, polygon_zones, polygon_annotators = refresh_areas(LOCATION, AREAS)
+    if area_ids is None and polygon_zones is None and polygon_annotators is None:
+        logger.error("Error retrieving areas. Exiting...")
+        return
 
-        if resp == SynapsisResponse.NOT_FOUND:
-            logger.warning(f"Area {area} not found in location {LOCATION}")
-            return
-        if resp == SynapsisResponse.SERVER_ERROR:
-            logger.error(f"Error retrieving area {area} in location {LOCATION}")
-            return
-        id_temp = resp["_id"]
-        area_ids.append(str(id_temp))
+    # Refresh areas trigger setup
+    last_refresh_areas_time = time.time()
+    refresh_areas_interval = 10  # seconds
 
-        p_temp = sv.PolygonZone(np.array(resp["polygon_zone"]))
-        polygon_zones.append(p_temp)
-        polygon_annotators.append(
-            sv.PolygonZoneAnnotator(zone=p_temp, color=sv.Color.WHITE, thickness=2)
-        )
-
-    last_trigger_time = time.time()
-    trigger_interval = 5  # seconds
-    trigger_flag = False
+    # Capture trigger setup
+    last_capture_trigger_time = time.time()
+    capture_trigger_interval = 5
+    capture_trigger_flag = False
     while True:
         frame = stream.read()
         if frame is None:
             break
 
+        # Inference
         result = model.track(
             source=frame,
             conf=0.45,
@@ -106,10 +119,18 @@ def main():
         detections = smoother.update_with_detections(detections)
 
         current_time = time.time()
-        if current_time - last_trigger_time >= trigger_interval:
-            trigger_flag = True
-            logger.info(f"Triggered event at {trigger_interval} second interval")
-            last_trigger_time = current_time
+        # Capture trigger
+        if current_time - last_capture_trigger_time >= capture_trigger_interval:
+            capture_trigger_flag = True
+            logger.info(
+                f"Triggered event at {capture_trigger_interval} second interval"
+            )
+            last_capture_trigger_time = current_time
+        # Refresh areas trigger
+        if current_time - last_refresh_areas_time >= refresh_areas_interval:
+            area_ids, polygon_zones, polygon_annotators = refresh_areas(LOCATION, AREAS)
+            logger.info(f"Refreshing areas at {refresh_areas_interval} second interval")
+            last_refresh_areas_time = current_time
 
         annotated_image = frame.copy()
         for area_id, area_name, polygon_zone, polygon_annotator in zip(
@@ -126,10 +147,9 @@ def main():
             )
 
             # trigger event for capture people inside polygon zone
-
-            if trigger_flag:
+            if capture_trigger_flag:
                 st_ = time.time()
-                
+
                 people_list = []
                 cropped_images = []
                 if detections.is_empty():
@@ -198,7 +218,7 @@ def main():
                 en = time.time()
                 logger.debug(f"Set people and counts time: {en - st_} seconds")
 
-        trigger_flag = False
+        capture_trigger_flag = False
 
         labels = [f"#{tracker_id}" for tracker_id in detections.tracker_id]
         annotated_image = trace_annotator.annotate(annotated_image, detections)
