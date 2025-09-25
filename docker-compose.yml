@@ -1,0 +1,103 @@
+version: "3.8"
+
+services:
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: "minioadmin"
+      MINIO_ROOT_PASSWORD: "minioadmin"
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    networks:
+      synapsis_net:
+        ipv4_address: 172.28.0.10
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+        sleep 5 && \
+        mc alias set local http://minio:9000 minioadmin minioadmin && \
+        mc mb --ignore-existing local/synapsis
+      "
+    networks:
+      synapsis_net:
+        ipv4_address: 172.28.0.11
+
+  mongodb:
+    image: mongodb/mongodb-community-server:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "admin"
+      MONGO_INITDB_ROOT_PASSWORD: "admin"
+    volumes:
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    restart: unless-stopped
+    networks:
+      synapsis_net:
+        ipv4_address: 172.28.0.12
+  
+  synapsis-api:
+    build: 
+      dockerfile: api.Dockerfile
+      context: api/
+    container_name: synapsis-api
+    ports:
+      - "8000:8000"
+    environment:
+      MONGODB_URI: "mongodb://admin:admin@172.28.0.12:27017"
+      MINIO_URI: "172.28.0.10:9000"
+      MINIO_SECURE: "False"
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET: "minioadmin"
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+      - minio
+    networks:
+      synapsis_net:
+        ipv4_address: 172.28.0.13
+  
+  synapsis-inference:
+    build: 
+      dockerfile: inference.Dockerfile
+      context: inference/
+    container_name: synapsis-inference
+    volumes:
+      - ./output:/app/output/
+    environment:
+      MONGODB_URI: "mongodb://admin:admin@172.28.0.12:27017"
+      MINIO_URI: "172.28.0.10:9000"
+      MINIO_SECURE: "False"
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET: "minioadmin"
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+      - minio
+    networks:
+      synapsis_net:
+        ipv4_address: 172.28.0.14
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+networks:
+  synapsis_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
