@@ -47,7 +47,7 @@ app = FastAPI()
 
 @app.get("/api/stats", tags=["status"])
 async def fastapi_get_stats(
-    start_time: int = None, end_time: int = None, page: int = 1, limit: int = 10
+    start_time: str = None, end_time: str = None, page: int = 1, limit: int = 10
 ):
     resp = get_count(start_time=start_time, end_time=end_time, page=page, limit=limit)
     if resp == SynapsisResponse.SERVER_ERROR:

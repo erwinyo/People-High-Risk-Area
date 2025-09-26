@@ -68,7 +68,11 @@ Counts
 ![Counts collection](https://raw.githubusercontent.com/erwinyo/People-High-Risk-Area/refs/heads/main/media/db_counts.png)
 ## Docker Deployment
 
-You have to following already installed
+Video Installation
+
+[![Watch the video](https://raw.githubusercontent.com/erwinyo/People-High-Risk-Area/refs/heads/main/media/how_to_thumbnail.png)](https://raw.githubusercontent.com/erwinyo/People-High-Risk-Area/refs/heads/main/media/how_to_docker_deployment.mp4)
+
+You have to have following already installed
 
 - git
 - docker & docker-compose (https://docs.docker.com/engine/install/)
@@ -89,11 +93,15 @@ docker compose -f docker-compose.yml up -d --build
 Run .mpd file on the **output/** folder
 - Open VLC media player
 - Click media, choose open file
-- Open .mpd file
+- Open .mpd file (located: /output/<date>_<time>/dash_out.mpd)
 *Note: the result is playable, but sometime lagging and stopped. Need refresh periodically.
 ## Manual Deployment
 
-You have to following already installed
+Video installation
+
+[![Watch the video](https://raw.githubusercontent.com/erwinyo/People-High-Risk-Area/refs/heads/main/media/how_to_thumbnail.png)](https://raw.githubusercontent.com/erwinyo/People-High-Risk-Area/refs/heads/main/media/how_to_manual_deployment.mp4)
+
+You have to have following already installed
 
 - git
 - uv (https://docs.astral.sh/uv/getting-started/installation)
@@ -108,6 +116,7 @@ git clone https://github.com/erwinyo/People-High-Risk-Area.git
 Deploy MongoDB and Minio Containers
 
 ```bash
+cd People-High-Risk-Area
 docker compose -f docker-compose-manual.yml up -d --build
 ```
 

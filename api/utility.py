@@ -62,7 +62,7 @@ def get_epoch_ms_iso_utc():
 def get_timestamp():
     # WIB timezone (UTC+7) Indonesia Western Standard Time
     WIB = timezone(timedelta(hours=7))
-    now_wib = datetime.now(WIB).isoformat()
+    now_wib = datetime.now(WIB)  # returns a datetime object
     return now_wib
 
 

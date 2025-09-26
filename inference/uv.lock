@@ -12,12 +12,6 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'win32'",
 ]
 
-[manifest]
-members = [
-    "api",
-    "people-high-risk-area",
-]
-
 [[package]]
 name = "aioice"
 version = "0.10.1"
@@ -73,33 +67,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c6/78/7d432127c41b50bccba979505f272c16cbcadcc33645d5fa3a738110ae75/anyio-4.11.0.tar.gz", hash = "sha256:82a8d0b81e318cc5ce71a5f1f8b5c4e63619620b63141ef8c995fa0db95a57c4", size = 219094, upload_time = "2025-09-23T09:19:12.58Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/15/b3/9b1a8074496371342ec1e796a96f99c82c945a339cd81a8e73de28b4cf9e/anyio-4.11.0-py3-none-any.whl", hash = "sha256:0287e96f4d26d4149305414d4e3bc32f0dcd0862365a4bddea19d7a1ec38c4fc", size = 109097, upload_time = "2025-09-23T09:19:10.601Z" },
-]
-
-[[package]]
-name = "api"
-version = "0.1.0"
-source = { virtual = "api" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "loguru" },
-    { name = "minio" },
-    { name = "pillow" },
-    { name = "pydantic" },
-    { name = "pymongo" },
-    { name = "python-dotenv" },
-    { name = "uvicorn" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.117.1" },
-    { name = "loguru", specifier = ">=0.7.3" },
-    { name = "minio", specifier = ">=7.2.16" },
-    { name = "pillow", specifier = ">=11.0.0" },
-    { name = "pydantic", specifier = ">=2.11.9" },
-    { name = "pymongo", specifier = ">=4.15.1" },
-    { name = "python-dotenv", specifier = ">=1.1.1" },
-    { name = "uvicorn", specifier = ">=0.37.0" },
 ]
 
 [[package]]
