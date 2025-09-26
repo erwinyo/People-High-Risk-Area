@@ -94,9 +94,10 @@ def main():
         "-extra_window_size": 2,
     }
     # describe a suitable manifest-file location/name
-    os.makedirs("output", exist_ok=True)
+    output_folder = f"output/{get_timestamp_for_filename()}"
+    os.makedirs(output_folder, exist_ok=True)
     streamer = StreamGear(
-        output="output/dash_out.mpd", format="dash", logging=True, **stream_params
+        output=f"{output_folder}/dash_out.mpd", format="dash", logging=True, **stream_params
     )
 
     # YOLO + Supervision setup
@@ -243,15 +244,15 @@ def main():
             scene=annotated_image, detections=detections, labels=labels
         )
 
-        # send frame to streamer
-        streamer.stream(annotated_image)
-
+    
         # Only show window if not running inside Docker
         if not os.path.exists("/.dockerenv"):
             cv2.imshow("view", annotated_image)
             if cv2.waitKey(delay) & 0xFF == ord("q"):
                 break
         else:
+            # send frame to streamer
+            streamer.stream(annotated_image)
             cv2.waitKey(delay)
 
     cv2.destroyAllWindows()
