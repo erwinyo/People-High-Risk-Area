@@ -7,7 +7,7 @@ import json
 import subprocess
 import atexit
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 # Third-party imports
 import cv2
@@ -16,31 +16,24 @@ import numpy as np
 import supervision as sv
 from loguru import logger
 from ultralytics import YOLO
-from pymongo import MongoClient
-from vidgear.gears import CamGear, VideoGear, StreamGear, WriteGear
-from vidgear.gears.asyncio import WebGear_RTC
+from vidgear.gears import CamGear, StreamGear
 
 
 # Local imports
 from utility import (
-    MONGODB_URI,
     get_epoch_ms_iso_utc,
-    get_timestamp,
-    get_areas,
-    update_area,
-    set_area,
     get_area,
     SynapsisResponse,
     upload_ndarray_to_minio,
-    set_people,
     set_people_many,
-    set_people_bulk_write,
     set_counts,
+    get_timestamp_for_filename
 )
 
 # Logger configuration
 logger.remove()
 logger.add(sys.stdout, level="TRACE")
+
 
 def refresh_areas(LOCATION, AREAS):
     area_ids, polygon_zones, polygon_annotators = [], [], []
@@ -66,18 +59,8 @@ def refresh_areas(LOCATION, AREAS):
 
 
 def main():
-    # Start api.py as a subprocess
-    api_process = subprocess.Popen(
-        [sys.executable, "api.py"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-        close_fds=True,
-        creationflags=subprocess.DETACHED_PROCESS if os.name == "nt" else 0,
-    )
-
-    LOCATION = "pedati_surken"
-    AREAS = ["lorong_pasar"]
+    LOCATION = "kepatihan"
+    AREAS = ["depan_gerbang_masuk"]
     """
     AREA options:
         kepatihan           : depan_gerbang_masuk
@@ -101,38 +84,20 @@ def main():
 
     # Start video stream
     stream = CamGear(source=SOURCES[LOCATION]).start()
-    delay = int(1000 / stream.framerate)  # in milliseconds
+    delay = int(1000 / stream.framerate)
 
-    # enable livestreaming and retrieve framerate from CamGear Stream and
-    # pass it as `-input_framerate` parameter for controlled framerate
+    # Enable livestreaming
     stream_params = {
         "-input_framerate": int(stream.framerate),
         "-livestream": True,
-        "-window_size": 2,  # Number of segments kept in the manifest (controls latency)
-        "-extra_window_size": 2,  # Additional segments kept outside the manifest window
+        "-window_size": 2,
+        "-extra_window_size": 2,
     }
     # describe a suitable manifest-file location/name
+    os.makedirs("output", exist_ok=True)
     streamer = StreamGear(
         output="output/dash_out.mpd", format="dash", logging=True, **stream_params
     )
-
-    # output_params = {
-    #     "-clones": ["-f", "lavfi", "-i", "anullsrc"],
-    #     "-vcodec": "libx264",
-    #     "-preset": "medium",
-    #     "-b:v": "4500k",
-    #     "-bufsize": "512k",
-    #     "-pix_fmt": "yuv420p",
-    #     "-f": "flv",
-    # }
-    # # Define writer with defined parameters
-    # writer = WriteGear(
-    #     output="rtmp://a.rtmp.youtube.com/live2/{}".format(
-    #         os.getenv("YOUTUBE_STREAM_KEY")
-    #     ),
-    #     logging=True,
-    #     **output_params,
-    # )
 
     # YOLO + Supervision setup
     model = YOLO(os.path.join("models", "yolo11l.pt"))
@@ -236,20 +201,12 @@ def main():
                         }
                     )
 
-                    # inserted_id = set_people(
-                    #     conf=float(confidence),
-                    #     bbox=[x1, y1, x2, y2],
-                    #     tracker_id=f"{PROGRAM_START_EPOCH_MS}_{tracker_id}",
-                    #     snapshot=presigned_url,
-                    # )
-
                 if people_list == []:
                     logger.warning(
                         f"No people detected inside polygon zone of {area_name}"
                     )
                     continue
                 # Insert people to MongoDB
-                # set_people_bulk_write(people_list, ordered=False)
                 inserted_ids = set_people_many(people_list)
                 if inserted_ids == SynapsisResponse.SERVER_ERROR:
                     logger.error("Error inserting people to database")
@@ -288,172 +245,19 @@ def main():
 
         # send frame to streamer
         streamer.stream(annotated_image)
-        # streamer.write(annotated_image)
-        # writer.write(annotated_image)
-        # show frame
-        # cv2.imshow("view", annotated_image)
-        # if cv2.waitKey(delay) & 0xFF == ord("q"):
-        #     break
 
-        cv2.waitKey(delay)
+        # Only show window if not running inside Docker
+        if not os.path.exists("/.dockerenv"):
+            cv2.imshow("view", annotated_image)
+            if cv2.waitKey(delay) & 0xFF == ord("q"):
+                break
+        else:
+            cv2.waitKey(delay)
 
-    # close output window
     cv2.destroyAllWindows()
-    # safely close video stream
     stream.stop()
-    # safely close streamer
     streamer.close()
-    # writer.close()
-
-
-def test_open_cv():
-    cap = cv2.VideoCapture(
-        "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_10_Kepatihan.stream/playlist.m3u8",
-        cv2.CAP_FFMPEG,
-    )
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    while True:
-        ret, frame = cap.read()
-        print(ret)
-        cv2.imshow("frame", frame)
-        if cv2.waitKey(30) & 0xFF == ord("q"):
-            break
-    cap.release()
-    cv2.destroyAllWindows()
-
-
-def test_vidgear():
-    # open any valid video stream(for e.g `myvideo.avi` file)
-    stream = VideoGear(
-        source="https://cctvjss.jogjakota.go.id/malioboro/Malioboro_10_Kepatihan.stream/playlist.m3u8"
-    ).start()
-
-    # loop over
-    while True:
-
-        # read frames from stream
-        frame = stream.read()
-
-        # check for frame if Nonetype
-        if frame is None:
-            break
-
-        # {do something with the frame here}
-
-        # Show output window
-        cv2.imshow("Output Frame", frame)
-
-        # check for 'q' key if pressed
-        key = cv2.waitKey(30) & 0xFF
-        if key == ord("q"):
-            break
-
-    # close output window
-    cv2.destroyAllWindows()
-
-    # safely close video stream
-    stream.stop()
-
-
-def capture_frame():
-    # cap = cv2.VideoCapture(
-    #     "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_10_Kepatihan.stream/playlist.m3u8",
-    #     cv2.CAP_FFMPEG,
-    # )
-
-    # cap = cv2.VideoCapture(
-    #     "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_30_Pasar_Beringharjo.stream/playlist.m3u8",
-    #     cv2.CAP_FFMPEG,
-    # )
-
-    # cap = cv2.VideoCapture(
-    #     "https://cctvjss.jogjakota.go.id/malioboro/NolKm_Utara.stream/playlist.m3u8",
-    #     cv2.CAP_FFMPEG,
-    # )
-
-    # cap = cv2.VideoCapture(
-    #     "https://restreamer3.kotabogor.go.id/memfs/eedbb9a2-1571-41bd-92db-73b946e3e9b2.m3u8",
-    #     cv2.CAP_FFMPEG,
-    # )
-
-    # cap = cv2.VideoCapture(
-    #     "https://restreamer3.kotabogor.go.id/memfs/b99d528a-1eb8-47bf-ba0f-a63fe11dbece.m3u8",
-    #     cv2.CAP_FFMPEG,
-    # )
-
-    cap = cv2.VideoCapture(
-        "https://restreamer3.kotabogor.go.id/memfs/c2d90a44-8f2c-4103-82ad-6cb1730a5000.m3u8",
-        cv2.CAP_FFMPEG,
-    )
-
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    ret, frame = cap.read()
-    cap.release()
-    if ret:
-        cv2.imwrite("frame.jpg", frame)
-
-
-def insert_area():
-    with open("areas.json", "r") as f:
-        area_data = json.load(f)
-    for location, areas in area_data.items():
-        for area in areas:
-            logger.info(f"Inserting area: {location}_{area['name']}")
-            resp = set_area(
-                location=location,
-                area_name=area["name"],
-                polygon_zone=area["polygon_zone"],
-            )
-            if resp == SynapsisResponse.BAD_REQUEST:
-                logger.warning(f"Area {location}_{area['name']} already exists")
-            elif resp == SynapsisResponse.SERVER_ERROR:
-                logger.error(f"Error inserting area {location}_{area['name']}")
-            else:
-                logger.info(f"Area {location}_{area['name']} inserted successfully")
-
-
-def test_mongo():
-    LOCATION = "kepatihan"
-    AREAS = "depan_gedung_baru"
-
-    # set_area(
-    #     {
-    #         "location": LOCATION,
-    #         "area_name": AREAS,
-    #         "polygon_zone": [[891, 902], [1757, 804], [2000, 850], [1000, 950]],
-    #         "updated_at": get_timestamp(),
-    #     }
-    # )
-
-    # update_area(
-    #     location=LOCATION,
-    #     area_name=AREAS,
-    #     config_value={
-    #         "polygon_zone": [[1000, 902], [1000, 804], [2000, 850], [1000, 950]],
-    #         "updated_at": get_timestamp(),
-    #     },
-    # )
-
-    # logger.debug(get_areas())
-    MONGODB_URI = "mongodb://admin:admin@localhost:27017"
-    mo_client = MongoClient(MONGODB_URI)
-    mo_synapsis_people = mo_client["synapsis"]["people"]
-    count = mo_synapsis_people.count_documents({"tracker_id": "1758646608497_1"})
-    logger.info(f"Count: {count}")
-
-
-def test_minio():
-    upload_ndarray_to_minio(
-        object_name="synapsis/kepatihan/test-ndarray.jpg",
-        ndarray_image=np.zeros((100, 100, 3), dtype=np.uint8),
-    )
 
 
 if __name__ == "__main__":
     main()
-    # test_open_cv()
-    # test_vidgear()
-    # capture_frame()
-    # insert_area()
-    # test_mongo()
-    # test_minio()

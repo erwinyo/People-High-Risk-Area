@@ -65,6 +65,11 @@ def get_timestamp():
     now_wib = datetime.now(WIB).isoformat()
     return now_wib
 
+def get_timestamp_for_filename():
+    # WIB timezone (UTC+7) Indonesia Western Standard Time
+    WIB = timezone(timedelta(hours=7))
+    now_wib = datetime.now(WIB).strftime("%Y%m%d_%H%M%S")
+    return now_wib
 
 # ============================================================
 # AREAS
@@ -372,6 +377,7 @@ def set_people_bulk_write(people_list, ordered=False):
                 },
                 ...
             ]
+        ordered (bool): Whether the inserts should be ordered. Defaults to False.
     """
     try:
         requests = [mo_synapsis_people.insert_one(i) for i in people_list]
