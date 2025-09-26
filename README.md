@@ -151,6 +151,12 @@ A window will be pop-up to show the inference
 | page       | int  | No       | 1       | Page number for paginated results.           |
 | limit      | int  | No       | 10      | Number of items per page.                    |
 
+Example Request
+```json
+http://localhost:8000/api/stats?start_time=1758905345&end_time=1758905360&page=1&limit=10
+http://localhost:8000/api/stats?page=1&limit=20
+
+```
 
 #### Get live count status 
 
@@ -178,6 +184,15 @@ A window will be pop-up to show the inference
 | polygon_zone | list[list[int]] | Yes      | Polygon coordinates defining the zone.    |
 
 
+Example Request
+```json
+{
+    "location": "kepatihan",
+    "area_name": "depan_gerbang_masuk",
+    "polygon_zone": [[735, 721], [1389, 682], [1757, 804], [891, 902]]
+}
+```
+
 
 ```http
   POST /api/get/area
@@ -189,6 +204,14 @@ A window will be pop-up to show the inference
 | area_name | str  | Yes      | The name of the area.     |
 
 
+Example Request
+```json
+{
+    "location": "kepatihan",
+    "area_name": "depan_gerbang_masuk",
+}
+```
+
 ```http
   POST /api/update/area
 ```
@@ -199,6 +222,14 @@ A window will be pop-up to show the inference
 | area_name    | str             | Yes      | The name of the area.                     |
 | polygon_zone | list[list[int]] | Yes      | Updated polygon coordinates for the zone. |
 
+Example Request
+```json
+{
+  "location": "kepatihan",
+  "area_name": "depan_gerbang_masuk",
+  "polygon_zone": [[735, 721], [1389, 682], [1757, 804], [891, 902]]
+}
+```
 
 
 ```http
@@ -209,6 +240,14 @@ A window will be pop-up to show the inference
 |-----------|------|----------|---------------------------|
 | location  | str  | Yes      | The location identifier.  |
 | area_name | str  | Yes      | The name of the area.     |
+
+Example Request
+```json
+{
+  "location": "kepatihan",
+  "area_name": "depan_gerbang_masuk"
+}
+```
 
 ## Screenshots
 

@@ -1,9 +1,11 @@
 # Built-in imports
+import re
 import os
 import time
 from enum import Enum
 from io import BytesIO
 from bson import ObjectId
+from dateutil import parser as _dateutil_parser
 from datetime import datetime, timezone, timedelta
 
 # Third-party imports
@@ -220,21 +222,80 @@ def get_count_live():
         return SynapsisResponse.NOT_FOUND
 
 
-def get_count(start_time=None, end_time=None, page=1, limit=10):
-    """Get count data from the database.
-
-    Args:
-        start_time (int, optional): Start time for the query. Defaults to None.
-        end_time (int, optional): End time for the query. Defaults to None.
-        page (int, optional): Page number for pagination. Defaults to 1.
-        limit (int, optional): Number of records to return per page. Defaults to 10.
-
-    Returns:
-        dict: The count data
+def _to_utc_datetime(t):
+    """Normalize t to a timezone-aware datetime in UTC.
+    Accepts:
+      - datetime (naive assumed UTC),
+      - int/float (epoch seconds or ms),
+      - numeric string (digits or digits.decimal -> epoch),
+      - ISO datetime string (parsed by dateutil or fromisoformat).
+    Raises ValueError for unsupported/unrecognized strings.
     """
+    if t is None:
+        return None
+
+    if isinstance(t, datetime):
+        dt = t
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    # numeric types -> epoch
+    if isinstance(t, (int, float)):
+        ts = float(t)
+        if ts > 1e12:  # likely milliseconds
+            ts /= 1000.0
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+    # strings
+    if isinstance(t, str):
+        s = t.strip()
+        # pure integer string -> epoch
+        if re.fullmatch(r"\d+", s):
+            ts = int(s)
+            if ts > 1e12:
+                ts /= 1000.0
+            return datetime.fromtimestamp(float(ts), tz=timezone.utc)
+        # float-like numeric string -> epoch
+        if re.fullmatch(r"\d+\.\d+", s):
+            ts = float(s)
+            if ts > 1e12:
+                ts /= 1000.0
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+        # otherwise try parsing as an ISO/normal date string
+        try:
+            if _dateutil_parser:
+                # isoparse is stricter; parse is more flexible
+                try:
+                    dt = _dateutil_parser.isoparse(s)
+                except Exception:
+                    dt = _dateutil_parser.parse(s)
+            else:
+                dt = datetime.fromisoformat(s)
+        except Exception as ex:
+            raise ValueError(
+                f"Unrecognized date string: {s!r}. "
+                "Pass an int/float epoch (seconds or ms) or an ISO datetime string."
+            ) from ex
+
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    raise ValueError(f"Unsupported time format/type: {type(t)!r} ({t!r})")
+
+
+# Then reuse the get_count from earlier but keep the improved normalization:
+def get_count(start_time=None, end_time=None, page=1, limit=10):
     query = {}
-    if start_time and end_time:
-        query["timestamp"] = {"$gte": start_time, "$lte": end_time}
+    ts_query = {}
+    if start_time is not None:
+        ts_query["$gte"] = _to_utc_datetime(start_time)
+    if end_time is not None:
+        ts_query["$lte"] = _to_utc_datetime(end_time)
+    if ts_query:
+        query["timestamp"] = ts_query
 
     skip = (page - 1) * limit
 
@@ -243,7 +304,6 @@ def get_count(start_time=None, end_time=None, page=1, limit=10):
             mo_synapsis_counts.find(query).skip(skip).limit(limit).sort("timestamp", -1)
         )
         data = list(cursor)
-        # Convert ObjectId to string
         for d in data:
             d["_id"] = str(d["_id"])
         total_in = sum(d.get("in", 0) for d in data)
@@ -251,7 +311,7 @@ def get_count(start_time=None, end_time=None, page=1, limit=10):
 
         total_records = mo_synapsis_counts.count_documents(query)
         logger.debug(
-            f"Retrieved counts: page={page}, limit={limit}, total_records={total_records}"
+            f"Retrieved counts: page={page}, limit={limit}, total_records={total_records}, query={query}"
         )
         return {
             "page": page,
