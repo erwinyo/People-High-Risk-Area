@@ -39,4 +39,4 @@ RUN if command -v uv >/dev/null 2>&1; then uv sync || true; else echo "uv not fo
 COPY . .
 
 USER root
-CMD ["uv", "run", "python", "main.py"]
+CMD ["uv", "run", "python", "inference.py"]
