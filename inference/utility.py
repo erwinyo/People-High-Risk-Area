@@ -65,11 +65,13 @@ def get_timestamp():
     now_wib = datetime.now(WIB).isoformat()
     return now_wib
 
+
 def get_timestamp_for_filename():
     # WIB timezone (UTC+7) Indonesia Western Standard Time
     WIB = timezone(timedelta(hours=7))
     now_wib = datetime.now(WIB).strftime("%Y%m%d_%H%M%S")
     return now_wib
+
 
 # ============================================================
 # AREAS
@@ -144,6 +146,8 @@ def set_area(location, area_name, polygon_zone):
             location = "kepatihan"
             area_name = "depan_gedung"
             polygon_zone = [[735, 721], [1389, 682], [1757, 804], [891, 902]]
+    Returns:
+        SynapsisResponse: SUCCESS, BAD_REQUEST, or SERVER_ERROR
     """
     if check_area_exists(location, area_name):
         logger.warning(f"Area already exists: `{area_name}` at location `{location}`")
@@ -284,6 +288,19 @@ def set_counts(
     in_people_tracker_id,
     out_people_tracker_id,
 ):
+    """
+    Insert a count record into the database.
+    Args:
+        area_id (str): The ID of the area.
+        in_num (int): Number of people detected entering the area.
+        out_num (int): Number of people detected exiting the area.
+        in_people_id (list of str): List of IDs of people who entered.
+        out_people_id (list of str): List of IDs of people who exited.
+        in_people_tracker_id (list of str): List of tracker IDs for people who entered.
+        out_people_tracker_id (list of str): List of tracker IDs for people who exited.
+    Returns:
+        SynapsisResponse: SUCCESS or SERVER_ERROR
+    """
     counts_by_tracker_id = {}
     for tracker_id in in_people_tracker_id:
         counts_by_tracker_id[f"{tracker_id}"] = get_count_by_tracker_id(tracker_id)
@@ -313,6 +330,16 @@ def set_counts(
 
 
 def set_people(conf, bbox, tracker_id, snapshot):
+    """Insert a single person record into the database.
+    Args:
+        conf (float): Confidence score of the detection.
+        bbox (list): Bounding box coordinates [x1, y1, x2, y2].
+        tracker_id (str): Unique tracker ID for the person.
+        snapshot (str): URL to the snapshot image.
+
+    Returns:
+        ObjectId: The ID of the inserted record or SynapsisResponse.SERVER_ERROR on failure
+    """
     try:
         result = mo_synapsis_people.insert_one(
             {
@@ -380,6 +407,10 @@ def set_people_bulk_write(people_list, ordered=False):
         ordered (bool): Whether the inserts should be ordered. Defaults to False.
     """
     try:
+        # Add timestamp to each record
+        timestamp = get_timestamp()
+        for person in people_list:
+            person["timestamp"] = timestamp
         requests = [mo_synapsis_people.insert_one(i) for i in people_list]
         mo_synapsis_people.bulk_write(requests, ordered=ordered)
         logger.debug(f"People bulk inserted: {len(people_list)} records")
@@ -394,6 +425,15 @@ def set_people_bulk_write(people_list, ordered=False):
 
 
 def upload_ndarray_to_minio(object_name, ndarray_image, expire_days=7, fmt="JPEG"):
+    """Upload a NumPy ndarray image to MinIO.
+    Args:
+        object_name (str): The object name in MinIO, including bucket and path.
+        ndarray_image (np.ndarray): The image as a NumPy ndarray.
+        expire_days (int, optional): URL expiration in days. Defaults to 7.
+        fmt (str, optional): Image format (e.g., 'JPEG', 'PNG'). Defaults to 'JPEG'.
+    Returns:
+        str: Presigned URL of the uploaded image or SynapsisResponse.SERVER_ERROR on failure
+    """
     try:
         if "/" not in object_name:
             raise ValueError(
