@@ -59,8 +59,8 @@ def refresh_areas(LOCATION, AREAS):
 
 
 def main():
-    LOCATION = "kepatihan"
-    AREAS = ["depan_gerbang_masuk"]
+    LOCATION = "kepatihan" # You can change this
+    AREAS = ["depan_gerbang_masuk"] # You can change this
     """
     AREA options:
         kepatihan           : depan_gerbang_masuk
