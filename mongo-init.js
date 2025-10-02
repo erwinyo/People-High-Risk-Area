@@ -1,14 +1,5 @@
 function getTimestamp() {
-  // Current time in Asia/Jakarta (WIB = UTC+7)
-  const now = new Date();
-
-  // Convert to WIB ISO string
-  const options = { timeZone: "Asia/Jakarta" };
-  const wibString = now.toLocaleString("sv-SE", options); // "YYYY-MM-DD HH:mm:ss"
-  
-  // Replace space with T and append offset
-  const isoWib = wibString.replace(" ", "T") + "+07:00";
-  return isoWib;
+    return new Date();  // UTC
 }
 
 db = db.getSiblingDB("synapsis");   // match MONGO_INITDB_DATABASE

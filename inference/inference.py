@@ -27,7 +27,8 @@ from utility import (
     upload_ndarray_to_minio,
     set_people_many,
     set_counts,
-    get_timestamp_for_filename
+    get_timestamp_for_filename,
+    get_area_names_based_on_location,
 )
 
 # Logger configuration
@@ -36,7 +37,7 @@ logger.add(sys.stdout, level="TRACE")
 
 
 def refresh_areas(LOCATION, AREAS):
-    area_ids, polygon_zones, polygon_annotators = [], [], []
+    area_ids, area_names, polygon_zones, polygon_annotators = [], [], [], []
     for area in AREAS:
         resp = get_area(location=LOCATION, area_name=area)
         logger.debug(f"Area response: {resp}")
@@ -49,20 +50,20 @@ def refresh_areas(LOCATION, AREAS):
             return None, None, None
         id_temp = resp["_id"]
         area_ids.append(str(id_temp))
+        area_names.append(resp["area_name"])
 
         p_temp = sv.PolygonZone(np.array(resp["polygon_zone"]))
         polygon_zones.append(p_temp)
         polygon_annotators.append(
             sv.PolygonZoneAnnotator(zone=p_temp, color=sv.Color.WHITE, thickness=2)
         )
-    return area_ids, polygon_zones, polygon_annotators
+    return area_ids, area_names, polygon_zones, polygon_annotators
 
 
 def main():
-    LOCATION = "kepatihan" # You can change this
-    AREAS = ["depan_gerbang_masuk"] # You can change this
+    LOCATION = "kepatihan"  # You can change this
     """
-    AREA options:
+    AREA options (default):
         kepatihan           : depan_gerbang_masuk
         beringharjo         : penyeberangan_pasar
         nolkm               : area_1, area_2
@@ -97,7 +98,10 @@ def main():
     output_folder = f"output/{get_timestamp_for_filename()}"
     os.makedirs(output_folder, exist_ok=True)
     streamer = StreamGear(
-        output=f"{output_folder}/dash_out.mpd", format="dash", logging=True, **stream_params
+        output=f"{output_folder}/dash_out.mpd",
+        format="dash",
+        logging=True,
+        **stream_params,
     )
 
     # YOLO + Supervision setup
@@ -109,7 +113,9 @@ def main():
     trace_annotator = sv.TraceAnnotator()
 
     # Define polygon zone
-    area_ids, polygon_zones, polygon_annotators = refresh_areas(LOCATION, AREAS)
+    area_ids, area_names, polygon_zones, polygon_annotators = refresh_areas(
+        LOCATION, get_area_names_based_on_location(LOCATION)
+    )
     if area_ids is None and polygon_zones is None and polygon_annotators is None:
         logger.error("Error retrieving areas. Exiting...")
         return
@@ -151,13 +157,15 @@ def main():
             last_capture_trigger_time = current_time
         # Refresh areas trigger
         if current_time - last_refresh_areas_time >= refresh_areas_interval:
-            area_ids, polygon_zones, polygon_annotators = refresh_areas(LOCATION, AREAS)
+            area_ids, area_names, polygon_zones, polygon_annotators = refresh_areas(
+                LOCATION, get_area_names_based_on_location(LOCATION)
+            )
             logger.info(f"Refreshing areas at {refresh_areas_interval} second interval")
             last_refresh_areas_time = current_time
 
         annotated_image = frame.copy()
         for area_id, area_name, polygon_zone, polygon_annotator in zip(
-            area_ids, AREAS, polygon_zones, polygon_annotators
+            area_ids, area_names, polygon_zones, polygon_annotators
         ):
             polygon_trigger = polygon_zone.trigger(detections)
             detections_inside = detections[polygon_trigger]
@@ -244,7 +252,6 @@ def main():
             scene=annotated_image, detections=detections, labels=labels
         )
 
-    
         # Only show window if not running inside Docker
         if not os.path.exists("/.dockerenv"):
             cv2.imshow("view", annotated_image)
@@ -260,5 +267,10 @@ def main():
     streamer.close()
 
 
+def test_get_area_based_on_location():
+    print(get_area_names_based_on_location("kepatihan"))
+
+
 if __name__ == "__main__":
     main()
+    # test_get_area_based_on_location()
