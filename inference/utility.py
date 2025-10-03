@@ -228,19 +228,19 @@ def get_count_live():
 
 # Then reuse the get_count from earlier but keep the improved normalization:
 def get_count(
-    start_time: str = None, end_time: str = None, page: str = "10", limit: str = "10"
+    start_time: str = None, end_time: str = None, page: int = 1, limit: int = 10
 ):
     # Converted to int
-    start_time = int(start_time)
-    end_time = int(end_time)
     page = int(page)
     limit = int(limit)
 
     query = {}
     ts_query = {}
     if start_time is not None:
+        start_time = int(start_time)
         ts_query["$gte"] = datetime.fromtimestamp(start_time)
     if end_time is not None:
+        end_time = int(end_time)
         ts_query["$lte"] = datetime.fromtimestamp(end_time)
     if ts_query:
         query["timestamp"] = ts_query

@@ -2,12 +2,12 @@
   "area_id": "ObjectId('653f2a...')",
   "in": 5,
   "out": 10,
-  "in_people_id": ["ObjectId('653f2a...')", "ObjectId('653f2a...')", ...],
-  "out_people_id": ["ObjectId('653f2a...')", ...],
-  "in_people_tracker_id": ["1758507330123_12", ...],
-  "out_people_tracker_id": ["1758507330123_34", ...],
+  "in_people_id": ["ObjectId('653f2a...')", "ObjectId('653f2a...')", ..],
+  "out_people_id": ["ObjectId('653f2a...')", ..],
+  "in_people_tracker_id": ["1758507330123_12", ..],
+  "out_people_tracker_id": ["1758507330123_34", ..],
   "in_people_num_occurance": {
-    "1758507330123_12": 2, ...
+    "1758507330123_12": 2, ..
   },
-  "timestamp": "2025-09-23T13:34:17.777093+00:00"
+  "timestamp": 2025-09-23T13:34:17.777093+00:00
 }
