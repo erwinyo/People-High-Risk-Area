@@ -62,10 +62,8 @@ def get_epoch_ms_iso_utc():
 
 
 def get_timestamp():
-    # WIB timezone (UTC+7) Indonesia Western Standard Time
-    WIB = timezone(timedelta(hours=7))
-    now_wib = datetime.now(WIB)  # returns a datetime object
-    return now_wib
+    now_utc = datetime.now(timezone.utc)
+    return now_utc
 
 
 def get_timestamp_for_filename():
@@ -77,6 +75,12 @@ def get_timestamp_for_filename():
 
 # ============================================================
 # AREAS
+
+
+def get_area_names_based_on_location(location):
+    areas = list(mo_synapsis_areas.find({"location": location}))
+    areas = [area["area_name"] for area in areas]
+    return areas
 
 
 def check_area_exists(location, area_name):
@@ -222,78 +226,22 @@ def get_count_live():
         return SynapsisResponse.NOT_FOUND
 
 
-def _to_utc_datetime(t):
-    """Normalize t to a timezone-aware datetime in UTC.
-    Accepts:
-      - datetime (naive assumed UTC),
-      - int/float (epoch seconds or ms),
-      - numeric string (digits or digits.decimal -> epoch),
-      - ISO datetime string (parsed by dateutil or fromisoformat).
-    Raises ValueError for unsupported/unrecognized strings.
-    """
-    if t is None:
-        return None
-
-    if isinstance(t, datetime):
-        dt = t
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-
-    # numeric types -> epoch
-    if isinstance(t, (int, float)):
-        ts = float(t)
-        if ts > 1e12:  # likely milliseconds
-            ts /= 1000.0
-        return datetime.fromtimestamp(ts, tz=timezone.utc)
-
-    # strings
-    if isinstance(t, str):
-        s = t.strip()
-        # pure integer string -> epoch
-        if re.fullmatch(r"\d+", s):
-            ts = int(s)
-            if ts > 1e12:
-                ts /= 1000.0
-            return datetime.fromtimestamp(float(ts), tz=timezone.utc)
-        # float-like numeric string -> epoch
-        if re.fullmatch(r"\d+\.\d+", s):
-            ts = float(s)
-            if ts > 1e12:
-                ts /= 1000.0
-            return datetime.fromtimestamp(ts, tz=timezone.utc)
-
-        # otherwise try parsing as an ISO/normal date string
-        try:
-            if _dateutil_parser:
-                # isoparse is stricter; parse is more flexible
-                try:
-                    dt = _dateutil_parser.isoparse(s)
-                except Exception:
-                    dt = _dateutil_parser.parse(s)
-            else:
-                dt = datetime.fromisoformat(s)
-        except Exception as ex:
-            raise ValueError(
-                f"Unrecognized date string: {s!r}. "
-                "Pass an int/float epoch (seconds or ms) or an ISO datetime string."
-            ) from ex
-
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-
-    raise ValueError(f"Unsupported time format/type: {type(t)!r} ({t!r})")
-
-
 # Then reuse the get_count from earlier but keep the improved normalization:
-def get_count(start_time=None, end_time=None, page=1, limit=10):
+def get_count(
+    start_time: str = None, end_time: str = None, page: int = 1, limit: int = 10
+):
+    # Converted to int
+    page = int(page)
+    limit = int(limit)
+
     query = {}
     ts_query = {}
     if start_time is not None:
-        ts_query["$gte"] = _to_utc_datetime(start_time)
+        start_time = int(start_time)
+        ts_query["$gte"] = datetime.fromtimestamp(start_time)
     if end_time is not None:
-        ts_query["$lte"] = _to_utc_datetime(end_time)
+        end_time = int(end_time)
+        ts_query["$lte"] = datetime.fromtimestamp(end_time)
     if ts_query:
         query["timestamp"] = ts_query
 
